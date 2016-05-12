@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title> COS426 Final Project</title>
+     	<script src='js/pdfmake.min.js'></script>
+ 	    <script src='js/vfs_fonts.js'></script>
+    <!-- <link href="css/style.css" type="text/css" rel="stylesheet"/> -->
+</head>
+
+
+<script type="text/javascript" src="libjs/dat.gui.min.js"></script> 
+<script type="text/javascript" src="js/image.js"></script>
+<script type="text/javascript" src="js/bbdigitize.js"></script>
+<!-- Perhaps we can use this as possible alternative for GPU Gasussian (can't figure out how to use yet) --> 
+<!--<script type="text/javascript" src="libjs/emage.min.js"></script>-->
+<script type="text/javascript">
+/* global dat */
+// Initial parameters to draw onto background.
+var canvas          = undefined;
+var hiddenCanvas    = undefined;
+var ctx             = undefined;
+var origImg         = undefined;
+var imageStackObjs  = [];
+var isNativeSize    = true;
+var gui             = undefined;
+var interfaceParams = undefined;
+var f2              = undefined;
+var imgIndex        = 1;
+
+
+
+var imageController = function() {
+  this.imageName = '1.jpg';
+  this.threshold = 0.1;
+  this.nativeSize = true;
+  this.refreshImage = function(){ changeImage(origImg) };
+  
+  this.downloadPDF = function(){ download() };
+  this.removeImg = function() { removeFromStack(this.imageStack); }
+  this.loadSelectedItem = function() { loadFromStack(this.imageStack); }
+  this.pushToStack = function(){ pushImgToStack(getCanvasImage()) };
+  this.stack = [''];
+  this.imageStack = ''; // This is also the currently selected obj
+};
+
+// This is basically the constructor for the script to run correctly.
+window.onload = function() {
+  ////////////////////////////////
+  //////  Initialize GUI  ////////
+  ////////////////////////////////
+  interfaceParams = new imageController();
+  gui = new dat.GUI();
+  gui.add(interfaceParams, 'imageName').onFinishChange(loadImageFromName).listen()
+  gui.add(interfaceParams, 'threshold', 0, 1).step(0.01).onFinishChange(processImage);
+  gui.add(interfaceParams, 'nativeSize').onChange(function() { 
+    isNativeSize = !isNativeSize; 
+    if (!isNativeSize) {
+      resizeCurrentImage(4);
+    } else {
+      changeImage(getUnmodifiedImage());
+    }
+  });
+  gui.add(interfaceParams, 'refreshImage')
+  f2 = gui.addFolder('Image Stack');
+  f2.add(interfaceParams, 'downloadPDF');
+  f2.add(interfaceParams, 'removeImg')
+  f2.add(interfaceParams, 'loadSelectedItem')
+  f2.add(interfaceParams, 'pushToStack')
+  
+  imgListbox = f2.add(interfaceParams, 'imageStack', interfaceParams.stack );
+  
+  ////////////////////////////////
+  ////////  Init Canvas  /////////
+  ////////////////////////////////
+  canvas = document.getElementById("canvas");
+  hiddenCanvas = document.getElementById("hiddenCanvas");
+  ctx = canvas.getContext("2d");
+  hiddenCTX = hiddenCanvas.getContext("2d")
+  loadImageFromName("1.jpg");
+
+var target = document.getElementById("canvas");
+target.addEventListener("dragover", function(e){e.preventDefault();}, true);
+target.addEventListener("drop", function(e){
+	e.preventDefault(); 
+	loadImage(e.dataTransfer.files[0]);
+}, true);
+
+};
+
+// Have this call a function from another script file to do the processing.
+// In that new file, this is where we will do the image processing.
+var processImage = function(threshold)
+{
+  // When interfacing with the preprocessor, simply call
+  // the funciton that you want and pass the threshold and 
+  // the image to it and have it modify the contents
+  // (or create a defensive copy and then modify).
+  
+	var image = getUnmodifiedImage();
+	var newImg = preProcess(image, threshold);
+	changeImage(newImg);
+	
+// 	for (var i = 0; i < image.width; i++) {
+// 	  for (var j = 0; j < image.height; j++) {
+// 	    var pixel = image.getPixel(i, j);
+
+// 	    var converted = pixel.rgbToHsl()
+// 	    converted.data[2] *= threshold;
+
+// 	    image.setPixel(i, j,converted.hslToRgb());
+// 	  }
+// 	}
+// 	changeImage(image);
+}
+
+// Returns unmodified version of the image that was first loaded.
+var getUnmodifiedImage = function()
+{
+    var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    var imageData = origImg.getImageData();
+    var imageObj = new Image(origImg.width, origImg.height, imageData.data, interfaceParams.imageName);
+    
+    return imageObj;
+}
+
+// Returns the current image that is pained onto the canvas.
+var getCanvasImage = function() {
+  var imageObj = new Image(canvas.width, canvas.height, ctx.getImageData(0, 0, canvas.width, canvas.height), interfaceParams.imageName)
+  return imageObj;
+}
+
+// Loads an image given by the specified name (including extension).
+// The image has to be stored in the images folder.
+var loadImageFromName = function(name)
+{
+  var image = document.createElement("img");
+  image.src = "images/" + name
+
+  image.onload = function() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    canvas.width = image.width;
+    canvas.height = image.height;
+    ctx.drawImage(image, 0, 0);
+
+    var imageData = ctx.getImageData(0, 0, image.width, image.height);
+    var imageObj = new Image(image.width, image.height, imageData.data, name);
+    origImg = imageObj;
+  };
+}
+
+// Changes the image of the canvas to the one passed. Please note that
+// The parameter in this function accepts the extended OBJECT version
+// of images. (i.e. the one that contains pixel data directly)
+var changeImage = function(imageObj)
+{
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  canvas.width = imageObj.width;
+  canvas.height = imageObj.height;
+  ctx.putImageData(imageObj.getImageData(), 0, 0);
+}
+
+var changeImageFromURI = function(URI, name)
+{
+  var image = document.createElement("img");
+  image.src = URI;
+  
+  image.onload = function() {
+    canvas.height = image.height;
+    canvas.width = image.width;
+    ctx.drawImage(image,0 ,0);
+    interfaceParams.imageName = name;
+    
+    var imageData = ctx.getImageData(0, 0, image.width, image.height);
+    var imageObj = new Image(image.width, image.height, imageData.data, name);
+    origImg = imageObj;
+  }
+}
+
+var pushImgToStack = function(imageObj){
+  var name = imageObj.fileName;
+  var param = interfaceParams;
+  var stack = param.stack;
+  var changedName = imgIndex++ + '. ' + name;
+  
+  if (stack[0] == "") { stack[0] = changedName }
+  else { 
+    stack.push(changedName);
+    }
+  param.imageStack = changedName // Makes it auto select latest add.
+  imageStackObjs[changedName] = imageObj;
+
+  updateImageStack();
+}
+
+// Updates the gui of the image stack.
+var updateImageStack = function() {
+  // Update listbox
+  // BUG HERE FIX IT LATER
+  // make it so that everytime user selects from listbox,
+  // it calls the selectDropDown function.
+  f2.remove(imgListbox)
+  imgListbox = f2.add(interfaceParams, 'imageStack', interfaceParams.stack );
+  imgListbox.onChange(console.log(getStackImgName()));
+}
+
+// This method is called when a user selects an image from the listbox.
+var selectDropDown = function(imgName) {
+  // console.log(imgName);
+  console.log(imageStackObjs[imgName]);
+}
+
+// Removes the image from stack
+var removeFromStack = function(imgName) {
+  index = interfaceParams.stack.indexOf(imgName);
+  if (index > -1) { 
+    interfaceParams.stack.splice(index, 1) 
+    if (index-1 > -1) { interfaceParams.imageStack = interfaceParams.stack[index-1]; }
+    updateImageStack();
+  }
+}
+
+var loadFromStack = function(imgName) {
+    var image = imageStackObjs[imgName];
+
+    // Can't call changeImage for some reason. The image.getImageData function
+    // does a hack that messes this up.
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    canvas.width = image.width;
+    canvas.height = image.height;
+    ctx.putImageData(image.data, 0, 0);
+    interfaceParams.imageName = image.fileName;
+    // changeImage(image);
+}
+
+// Returns the currently selected image name.
+var getStackImgName = function() {
+  return interfaceParams.imageStack;
+}
+
+// Returns the currently selected image from the stack.
+var getStackImg = function() {
+  name = getStackImgName();
+  return imageStackObjs[name];
+}
+
+// For now, all it does is crop. Too lazy to implement scale
+var resizeCurrentImage = function(ratio) {
+  var img = getUnmodifiedImage();
+  var dest = Image.prototype.createImg(img.width/ratio, img.height/ratio); /* global Image */
+  
+  for (var i = 0; i < img.width/ratio; i++) {
+    for (var j = 0; j < img.height/ratio; j++) {
+      dest.setPixel(i, j, img.getPixel(i, j));
+    }
+  }
+  
+  origImg = dest;
+  changeImage(dest);
+}
+
+
+
+function loadImage(src){
+	//	Prevent any non-image file type from being read.
+	if(!src.type.match(/image.*/)){
+		console.log("The dropped file is not an image: ", src.type);
+		return;
+	}
+
+	//	Create our FileReader and run the results through the render function.
+	var reader = new FileReader();
+	reader.onload = function(e){
+		changeImageFromURI(e.target.result, src.name);
+	};
+	reader.readAsDataURL(src);
+}
+
+
+
+////////////////////////////////
+/////  Utility Functions  //////
+////////////////////////////////
+var nativeImgToObj = function(image, name)
+{
+    var imageData = ctx.getImageData(0, 0, image.width, image.height);
+    var imageObj = new Image(image.width, image.height, imageData.data, name);
+    
+    return imageObj;
+}
+
+// Downloads canvas into an image
+function download() {
+    var dt = canvas.toDataURL('image/jpeg');
+    var dtContents = [];
+    
+    for (var i = 0; i < interfaceParams.stack.length; i++) {
+      var imgName = interfaceParams.stack[i];
+      var imgObj = imageStackObjs[imgName];
+      if (imgObj == undefined) { continue }
+      hiddenCTX.clearRect(0, 0, hiddenCanvas.width, hiddenCanvas.height);
+      hiddenCanvas.width = imgObj.width;
+      hiddenCanvas.height = imgObj.height;
+      hiddenCTX.putImageData(imgObj.data, 0, 0);
+      var dtf = hiddenCanvas.toDataURL('image/jpeg');
+      dtContents.push({image: dtf, pageBreak: 'after', pageOrientation: 'landscape'});
+      hiddenCTX.clearRect(0, 0, hiddenCanvas.width, hiddenCanvas.height);
+    }
+
+  // How do change teh dimensions of each page?
+    // var doc = { pageSize: {width: canvas.width + 150, height: canvas.height + 150}, 
+    //             content: [{image: dt, pageBreak: 'after'},
+    //                       {image: dt, pageBreak: 'after'}] };
+    
+    // TODO: Make each page in PDF same size as each image.
+    var doc = { pageSize: {width: canvas.width + 150, height: canvas.height + 150}, content: dtContents };
+    
+    pdfMake.createPdf(doc).download('YourFileName.pdf'); 
+
+};
+
+</script>   
+<canvas id="canvas"> </canvas>
+<canvas id="hiddenCanvas"> </canvas>
+
+</html>
